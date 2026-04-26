@@ -585,6 +585,121 @@ def build_daily_event_type_stats(df: pd.DataFrame, event_type: str, all_dates: l
     return pd.DataFrame(rows)
 
 
+def build_overall_daily_stats(df: pd.DataFrame, all_dates: list) -> pd.DataFrame:
+    """生成整体每日趋势统计。"""
+    rows = []
+    for d in all_dates:
+        g = df[df["日期"] == d]
+        metrics = calc_overview_metrics(g)
+        rows.append({
+            "日期": d,
+            "日期文本": pd.to_datetime(d).strftime("%m-%d") if pd.notna(d) else "",
+            "事件总数": metrics["事件总数"],
+            "上报摄像头数": metrics["上报摄像头数"],
+            "通过事件数": metrics["通过事件数"],
+            "人工驳回事件数": metrics["人工驳回事件数"],
+            "系统驳回事件数": metrics["系统驳回事件数"],
+            "未处理事件数": metrics["未处理事件数"],
+            "推送事件数": metrics["推送事件数"],
+            "接收事件数": metrics["接收事件数"],
+        })
+    return pd.DataFrame(rows)
+
+
+def render_overall_daily_chart(df: pd.DataFrame, all_dates: list):
+    """渲染整体每日趋势：堆叠柱形图 + 上报摄像头数右轴折线。"""
+    stats = build_overall_daily_stats(df, all_dates)
+    if stats.empty:
+        st.info("当前筛选条件下暂无整体趋势数据。")
+        return
+
+    st.markdown("### 整体每日趋势")
+
+    bar_df = stats.melt(
+        id_vars=["日期文本"],
+        value_vars=["通过事件数", "人工驳回事件数", "系统驳回事件数", "未处理事件数"],
+        var_name="指标",
+        value_name="数量",
+    )
+
+    stack_order = {
+        "通过事件数": 1,
+        "人工驳回事件数": 2,
+        "系统驳回事件数": 3,
+        "未处理事件数": 4,
+    }
+    bar_df["堆叠顺序"] = bar_df["指标"].map(stack_order)
+
+    bar_chart = (
+        alt.Chart(bar_df)
+        .mark_bar()
+        .encode(
+            x=alt.X("日期文本:N", title="日期", sort=None),
+            y=alt.Y("数量:Q", title="事件数量"),
+            color=alt.Color(
+                "指标:N",
+                title="指标",
+                scale=alt.Scale(
+                    domain=["通过事件数", "人工驳回事件数", "系统驳回事件数", "未处理事件数"],
+                    range=["#1f77b4", "#d62728", "#7f7f7f", "#ffbf00"],
+                ),
+                sort=["通过事件数", "人工驳回事件数", "系统驳回事件数", "未处理事件数"],
+            ),
+            order=alt.Order("堆叠顺序:Q", sort="ascending"),
+            tooltip=[
+                alt.Tooltip("日期文本:N", title="日期"),
+                alt.Tooltip("指标:N", title="指标"),
+                alt.Tooltip("数量:Q", title="数量"),
+            ],
+        )
+        .properties(height=420)
+    )
+
+    camera_line_chart = (
+        alt.Chart(stats)
+        .mark_line(point=True, strokeWidth=2, color="black")
+        .encode(
+            x=alt.X("日期文本:N", title="日期", sort=None),
+            y=alt.Y(
+                "上报摄像头数:Q",
+                title="上报摄像头数",
+                axis=alt.Axis(orient="right"),
+            ),
+            tooltip=[
+                alt.Tooltip("日期文本:N", title="日期"),
+                alt.Tooltip("上报摄像头数:Q", title="上报摄像头数"),
+            ],
+        )
+    )
+
+    overall_chart = (
+        alt.layer(bar_chart, camera_line_chart)
+        .resolve_scale(y="independent")
+        .properties(height=420)
+    )
+
+    st.altair_chart(overall_chart, use_container_width=True)
+
+    with st.expander("查看整体每日明细表", expanded=False):
+        st.dataframe(
+            stats[
+                [
+                    "日期文本",
+                    "事件总数",
+                    "上报摄像头数",
+                    "通过事件数",
+                    "人工驳回事件数",
+                    "系统驳回事件数",
+                    "未处理事件数",
+                    "推送事件数",
+                    "接收事件数",
+                ]
+            ],
+            use_container_width=True,
+            height=220,
+        )
+
+
 def render_event_type_daily_charts(df: pd.DataFrame, event_type: str, all_dates: list):
     stats = build_daily_event_type_stats(df, event_type, all_dates)
 
@@ -821,6 +936,9 @@ with st.container(border=True):
             start_d = date_series.min()
             end_d = date_series.max()
             all_dates = list(pd.date_range(start=start_d, end=end_d, freq="D").date)
+
+            render_overall_daily_chart(filtered_df, all_dates)
+            st.markdown("---")
 
             event_type_order = [
                 "垃圾暴露类",
