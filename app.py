@@ -499,7 +499,27 @@ def render_filter_panel(source_df: pd.DataFrame, key_prefix: str) -> pd.DataFram
     event_type_options = sorted([x for x in source_df["违规类型_norm"].dropna().astype(str).unique().tolist() if x != ""])
 
     with c2:
-        selected_cameras = st.multiselect("摄像头（可多选）", options=camera_options, default=[], key=f"{key_prefix}_cameras")
+        camera_filter_mode = st.radio(
+            "摄像头筛选方式",
+            ["不筛选", "仅包含", "排除"],
+            horizontal=True,
+            key=f"{key_prefix}_camera_filter_mode",
+        )
+
+        selected_cameras = st.multiselect(
+            "摄像头（可多选）",
+            options=camera_options,
+            default=[],
+            key=f"{key_prefix}_cameras",
+        )
+
+        camera_batch_text = st.text_area(
+            "批量输入摄像头编号",
+            placeholder="每行一个，或用逗号/空格分隔",
+            height=90,
+            key=f"{key_prefix}_camera_batch_text",
+        )
+    
     with c3:
         selected_operators = st.multiselect("操作人（可多选）", options=operator_options, default=[], key=f"{key_prefix}_operators")
     with c4:
@@ -509,8 +529,22 @@ def render_filter_panel(source_df: pd.DataFrame, key_prefix: str) -> pd.DataFram
     if isinstance(date_range, tuple) and len(date_range) == 2:
         start_date, end_date = date_range
         filtered_df = filtered_df[filtered_df["日期"].between(start_date, end_date, inclusive="both")].copy()
-    if selected_cameras:
-        filtered_df = filtered_df[filtered_df["摄像头编号_norm"].isin(selected_cameras)].copy()
+    batch_cameras = []
+    if camera_batch_text:
+        batch_cameras = [
+            x.strip()
+            for x in camera_batch_text.replace("，", ",").replace("\n", ",").replace(" ", ",").split(",")
+            if x.strip()
+        ]
+
+    camera_filter_set = sorted(set(selected_cameras + batch_cameras))
+
+    if camera_filter_mode == "仅包含" and camera_filter_set:
+        filtered_df = filtered_df[filtered_df["摄像头编号_norm"].isin(camera_filter_set)].copy()
+
+    elif camera_filter_mode == "排除" and camera_filter_set:
+        filtered_df = filtered_df[~filtered_df["摄像头编号_norm"].isin(camera_filter_set)].copy()
+        
     if selected_operators:
         filtered_df = filtered_df[filtered_df["操作人_norm"].isin(selected_operators)].copy()
     if selected_event_types:
